@@ -22,6 +22,9 @@ training person attribute with mxnet
 
 http://otr41gcz3.bkt.clouddn.com/P100K_save.json
 
+## 可以借鉴的技术
+MOON： https://arxiv.org/abs/1603.07027
+
 
 ## TODOliST
 - [x] 调通基本训练框架，使用多分支fc得到多个属性结果
