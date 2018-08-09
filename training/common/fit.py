@@ -113,10 +113,11 @@ def add_fit_args(parser):
 
 class Multi_Acc_Metric(mx.metric.EvalMetric):
     """Calculate accuracies of multi label"""
-    def __init__(self, num=None, logger= None):
+    def __init__(self, num=None, logger= None,label_names = []):
         self.num = num
         self.logger = logger
-        super(Multi_Acc_Metric, self).__init__('multi-metric', num=num)
+        self.label_names= label_names
+        super(Multi_Acc_Metric, self).__init__('multi-metric', num=num,label_names= label_names)
 
     def reset(self):
         """Resets the internal evaluation result to initial state."""
@@ -167,16 +168,21 @@ class Multi_Acc_Metric(mx.metric.EvalMetric):
         if self.num is None:
             return super(Multi_Metric, self).get()
         else:
-            #acc = self.sum_metric[0] / self.num_inst[0] if self.num_inst[0] != 0 else float('nan')
-            loss = [self.sum_metric[i] / self.num_inst[i] for i in range(self.num)]
-            temp =0.0
-            for acc in loss:
-                temp +=acc
-            acc = temp/len(loss)
-            loss = [acc] + loss
+            if len(self.label_names) == self.num:
+                loss = [self.sum_metric[i] / self.num_inst[i] for i in range(self.num)]
+                return zip(*(('%s-%s'%(self.name, self.label_names[i]), loss[i]) for i in range(self.num)))
+            else:
+                #acc = self.sum_metric[0] / self.num_inst[0] if self.num_inst[0] != 0 else float('nan')
+                loss = [self.sum_metric[i] / self.num_inst[i] for i in range(self.num)]
+                temp =0.0
+                for acc in loss:
+                    temp +=acc
+                acc = temp/len(loss)
+                loss = [acc] + loss
             
-            return zip(*(('%s-task%d'%(self.name, i), loss[i]) for i in range(1)))
-#            return zip(*(('%s-task%d'%(self.name, i), loss[i]) for i in range(self.num)))
+                return zip(*(('%s-task%d'%(self.name, i), loss[i]) for i in range(1)))
+
+            
 
     def get_name_value(self):
         """Returns zipped name and value pairs.
@@ -280,7 +286,7 @@ def fit(args, network, data_loader, **kwargs):
     if args.top_k > 0:
         eval_metrics.append(mx.metric.create('top_k_accuracy', top_k=args.top_k))
         
-    eval_metrics = Multi_Acc_Metric(num=7)
+    eval_metrics = Multi_Acc_Metric(num=7,label_names= ['gender_label','hat_label','bag_label','handbag_label','backpack_label','updress_label','downdress_label'])
 
     # callbacks that run after each batch
     batch_end_callbacks = [mx.callback.Speedometer(args.batch_size, args.disp_batches)]
