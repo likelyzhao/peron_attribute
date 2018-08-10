@@ -30,47 +30,68 @@ def get_fine_tune_model(symbol, arg_params, num_classes, layer_name):
     num_classes: the number of classes for the fine-tune datasets
     layer_name: the layer name before the last fully-connected layer
     """
+    
+    #downdress_label = mx.sym.Variable('downdress_label')
+    
     all_layers = symbol.get_internals()
     net = all_layers[layer_name+'_output']
-    num_hidden = 64 
+    num_hidden =  1024
     
-    net_gender = mx.symbol.Dropout(net, p = 0.5)
-    net_gender = mx.symbol.FullyConnected(data=net_gender, num_hidden=num_hidden, name='fc-gender-hidden')
-    net_gender = mx.symbol.FullyConnected(data=net_gender, num_hidden=2, name='fc-gender')
-    net_gender = mx.symbol.SoftmaxOutput(data=net_gender, name='gender')
+    net_gender_split = net
+    net_gender = mx.symbol.Dropout(net_gender_split, p = 0.5)
+    net_gender_hidden = mx.symbol.FullyConnected(data=net_gender_split, num_hidden=num_hidden, name='fc-gender-hidden')
+    net_gender_fc = mx.symbol.FullyConnected(data=net_gender_hidden, num_hidden=2, name='fc-gender')
+    #net_gender_fc = mx.symbol.BlockGrad(net_gender_fc)
+    net_gender = mx.symbol.SoftmaxOutput(data=net_gender_fc, name='gender',grad_scale=0.1)
     
-    net_hat = mx.symbol.Dropout(net, p = 0.5)
-    net_hat = mx.symbol.FullyConnected(data=net_hat, num_hidden=num_hidden, name='fc-hat-hidden')
-    net_hat = mx.symbol.FullyConnected(data=net_hat, num_hidden=2, name='fc-hat')
-    net_hat = mx.symbol.SoftmaxOutput(data=net_hat, name='hat')
+    net_hat_split = net
+    net_hat = mx.symbol.Dropout(net_hat_split, p = 0.5)
+    net_hat_hidden = mx.symbol.FullyConnected(data=net_hat_split, num_hidden=num_hidden, name='fc-hat-hidden')
+    net_hat_fc = mx.symbol.FullyConnected(data=net_hat_hidden, num_hidden=2, name='fc-hat')
+    #net_hat_fc = mx.symbol.BlockGrad(net_hat_fc)
+    net_hat = mx.symbol.SoftmaxOutput(data=net_hat_fc, name='hat',grad_scale=0.1)
     
-    net_bag = mx.symbol.Dropout(net, p = 0.5)
-    net_bag = mx.symbol.FullyConnected(data=net_bag, num_hidden=num_hidden, name='fc-bag-hidden')
-    net_bag = mx.symbol.FullyConnected(data=net_bag, num_hidden=2, name='fc-bag')
-    net_bag = mx.symbol.SoftmaxOutput(data=net_bag, name='bag')
+    net_bag_split = net
+    net_bag = mx.symbol.Dropout(net_bag_split, p = 0.5)
+    net_bag_hidden = mx.symbol.FullyConnected(data=net_bag_split, num_hidden=num_hidden, name='fc-bag-hidden')
+    net_bag_fc = mx.symbol.FullyConnected(data=net_bag_hidden, num_hidden=2, name='fc-bag')
+    #net_bag_fc = mx.symbol.BlockGrad(net_bag_fc)
+    net_bag = mx.symbol.SoftmaxOutput(data=net_bag_fc, name='bag',grad_scale=0.1)
     
-    net_handbag = mx.symbol.Dropout(net, p = 0.5)
-    net_handbag = mx.symbol.FullyConnected(data=net_handbag, num_hidden=num_hidden, name='fc-handbag-hidden')
-    net_handbag = mx.symbol.FullyConnected(data=net_handbag, num_hidden=2, name='fc-handbag')
-    net_handbag = mx.symbol.SoftmaxOutput(data=net_handbag, name='handbag')
+    net_handbag_split = net
+    net_handbag = mx.symbol.Dropout(net_handbag_split, p = 0.5)
+    net_handbag_hidden = mx.symbol.FullyConnected(data=net_handbag_split, num_hidden=num_hidden, name='fc-handbag-hidden')
+    net_handbag_fc = mx.symbol.FullyConnected(data=net_handbag_hidden, num_hidden=2, name='fc-handbag')
+    #net_handbag_fc = mx.symbol.BlockGrad(net_handbag_fc)
+    net_handbag = mx.symbol.SoftmaxOutput(data=net_handbag_fc, name='handbag',grad_scale=0.1)
     
-    net_backpack = mx.symbol.Dropout(net, p = 0.5)
-    net_backpack = mx.symbol.FullyConnected(data=net_backpack, num_hidden=num_hidden, name='fc-backpack-hidden')
-    net_backpack= mx.symbol.FullyConnected(data=net_backpack, num_hidden=2, name='fc-backpack')
-    net_backpack = mx.symbol.SoftmaxOutput(data=net_backpack, name='backpack')
+    net_backpack_split = net
+    net_backpack = mx.symbol.Dropout(net_backpack_split, p = 0.5)
+    net_backpack_hidden = mx.symbol.FullyConnected(data=net_backpack_split, num_hidden=num_hidden, name='fc-backpack-hidden')
+    net_backpack_fc= mx.symbol.FullyConnected(data=net_backpack_hidden, num_hidden=2, name='fc-backpack')
+    #net_backpack_fc = mx.symbol.BlockGrad(net_backpack_fc)
+    net_backpack = mx.symbol.SoftmaxOutput(data=net_backpack_fc, name='backpack',grad_scale=0.1)
     
+    net_updress_split = net
+    net_updress = mx.symbol.Dropout(net_updress_split, p = 0.5)
+    net_updress_hidden = mx.symbol.FullyConnected(data=net_updress_split, num_hidden=num_hidden, name='fc-updress-hidden')
+    net_updress_fc = mx.symbol.FullyConnected(data=net_updress_hidden, num_hidden=7, name='fc-updress')
+    #net_updress_fc = mx.symbol.BlockGrad(net_updress_fc)
+    net_updress = mx.symbol.SoftmaxOutput(data=net_updress_fc, name='updress', ignore_label=-1,use_ignore=True)
 
-    net_updress = mx.symbol.Dropout(net, p = 0.5)
-    net_updress = mx.symbol.FullyConnected(data=net_updress, num_hidden=num_hidden, name='fc-updress-hidden')
-    net_updress = mx.symbol.FullyConnected(data=net_updress, num_hidden=8, name='fc-updress')
-    net_updress = mx.symbol.SoftmaxOutput(data=net_updress, name='updress')
-
-    net_downdress = mx.symbol.Dropout(net, p = 0.5)
-    net_downdress = mx.symbol.FullyConnected(data=net_downdress, num_hidden=num_hidden, name='fc-downdress-hidden')
-    net_downdress = mx.symbol.FullyConnected(data=net_downdress, num_hidden=11, name='fc-downdress')
-    net_downdress = mx.symbol.SoftmaxOutput(data=net_downdress, name='downdress')
+    net_downdress_split = net
+    net_downdress = mx.symbol.Dropout(net_downdress_split, p = 0.5)
+    net_downdress_hidden = mx.symbol.FullyConnected(data=net_downdress_split, num_hidden=num_hidden, name='fc-downdress-hidden')
+    net_downdress_fc = mx.symbol.FullyConnected(data=net_downdress_hidden, num_hidden=10, name='fc-downdress')
+    #net_downdress_fc = mx.symbol.BlockGrad(net_downdress_fc)
+    net_downdress = mx.symbol.SoftmaxOutput(data=net_downdress_fc, name='downdress',ignore_label= -1,use_ignore=True)
     
     new_args = dict({k:arg_params[k] for k in arg_params if 'fc' not in k})
+    
+    
+    #net = mx.symbol.Group([mx.symbol.BlockGrad(net_gender), mx.symbol.BlockGrad(net_hat), mx.symbol.BlockGrad(net_bag),
+    #                       mx.symbol.BlockGrad(net_handbag), mx.symbol.BlockGrad(net_backpack)
+    #                       ,mx.symbol.BlockGrad(net_updress), mx.symbol.BlockGrad(net_downdress)])
     net = mx.symbol.Group([net_gender, net_hat, net_bag, net_handbag, net_backpack,net_updress, net_downdress])
     
     return (net, new_args)
@@ -113,6 +134,10 @@ if __name__ == "__main__":
     print("out-shape")
     print(out_shape)
 
+    print("arg_shape")
+    print(arg_shape)
+    
+    
     # train
     fit.fit(args        = args,
             network     = new_sym,
