@@ -141,8 +141,17 @@ class Multi_Acc_Metric(mx.metric.EvalMetric):
                 self.sum_metric += (pred_label.flat == label.flat).sum()
                 self.num_inst += len(pred_label.flat)
             else:
-                self.sum_metric[i] += (pred_label.flat == label.flat).sum()
-                self.num_inst[i] += len(pred_label.flat)
+                if 0 <= i <= 4:
+                    self.sum_metric[i] += (pred_label.flat == label.flat).sum()
+                    self.num_inst[i] += len(pred_label.flat)
+                if i == 5 or i == 6:
+                    self.sum_metric[i] += (pred_label.flat == label.flat).sum()
+                    temp = len(pred_label.flat)
+                    for item in label:
+                        if item == -1:
+                            temp-=1
+                    self.num_inst[i] += temp
+
 
         # verification losses
  #       for i in range(self.cls, len(preds)):
