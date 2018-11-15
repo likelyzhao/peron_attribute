@@ -19,6 +19,9 @@ import mxnet as mx
 import logging
 import os
 import time
+from mxboard import SummaryWriter
+
+
 
 def _get_lr_scheduler(args, kv):
     if 'lr_factor' not in args or args.lr_factor >= 1:
@@ -109,7 +112,6 @@ def add_fit_args(parser):
     train.add_argument('--gc-threshold', type=float, default=0.5,
                        help='threshold for 2bit gradient compression')
     return train
-
 
 class Multi_Acc_Metric(mx.metric.EvalMetric):
     """Calculate accuracies of multi label"""
@@ -205,9 +207,120 @@ class Multi_Acc_Metric(mx.metric.EvalMetric):
         name, value = self.get()
         return list(zip(name, value))
 
+class LogMetricsCallback(object):
+    """Log metrics periodically in TensorBoard.
+    This callback works almost same as `callback.Speedometer`, but write TensorBoard event file
+    for visualization. For more usage, please refer https://github.com/dmlc/tensorboard
 
-    
+    Parameters
+    ----------
+    logging_dir : str
+        TensorBoard event file directory.
+        After that, use `tensorboard --logdir=path/to/logs` to launch TensorBoard visualization.
+    prefix : str
+        Prefix for a metric name of `scalar` value.
+        You might want to use this param to leverage TensorBoard plot feature,
+        where TensorBoard plots different curves in one graph when they have same `name`.
+        The follow example shows the usage(how to compare a train and eval metric in a same graph).
 
+    Examples
+    --------
+    >>> # log train and eval metrics under different directories.
+    >>> training_log = 'logs/train'
+    >>> evaluation_log = 'logs/eval'
+    >>> # in this case, each training and evaluation metric pairs has same name, you can add a prefix
+    >>> # to make it separate.
+    >>> batch_end_callbacks = [mx.tensorboard.LogMetricsCallback(training_log)]
+    >>> eval_end_callbacks = [mx.tensorboard.LogMetricsCallback(evaluation_log)]
+    >>> # run
+    >>> model.fit(train,
+    >>>     ...
+    >>>     batch_end_callback = batch_end_callbacks,
+    >>>     eval_end_callback  = eval_end_callbacks)
+    >>> # Then use `tensorboard --logdir=logs/` to launch TensorBoard visualization.
+    """
+    def __init__(self, summary_writer, prefix=None):
+        self.prefix = prefix
+        self.summary_writer =summary_writer
+        try:
+            from tensorboard import SummaryWriter
+            self.summary_writer =summary_writer
+        except ImportError:
+            logging.error('You can install tensorboard via `pip install tensorboard`.')
+
+    def __call__(self, param):
+        """Callback to log training speed and metrics in TensorBoard."""
+        if param.eval_metric is None:
+            return
+        name_value = param.eval_metric.get_name_value()
+        print(name_value)
+        for name, value in name_value:
+            if self.prefix is not None:
+                name = '%s-%s' % (self.prefix, name)
+            self.summary_writer.add_scalar(tag='accuracy-val',value={name:value},
+                global_step=param.epoch)
+
+class Speedometerboradwriter(object):
+    """Logs training speed and evaluation metrics periodically.
+
+    Parameters
+    ----------
+    batch_size: int
+        Batch size of data.
+    frequent: int
+        Specifies how frequently training speed and evaluation metrics
+        must be logged. Default behavior is to log once every 50 batches.
+    auto_reset : bool
+        Reset the evaluation metrics after each log.
+
+    """
+    def __init__(self, batch_size, summary_writer, frequent=50, auto_reset=True):
+        self.batch_size = batch_size
+        self.frequent = frequent
+        self.init = False
+        self.tic = 0
+        self.last_count = 0
+        self.auto_reset = auto_reset
+        self.summary_writer = summary_writer
+
+    def __call__(self, param):
+        """Callback to Show speed."""
+        count = param.nbatch
+        if self.last_count > count:
+            self.init = False
+        self.last_count = count
+
+        if self.init:
+            if count % self.frequent == 0:
+                # #11504
+                try:
+                    speed = self.frequent * self.batch_size / (time.time() - self.tic)
+                except ZeroDivisionError:
+                    speed = float('inf')
+                if param.eval_metric is not None:
+                    name_value = param.eval_metric.get_name_value()
+                    if self.auto_reset:
+                        param.eval_metric.reset()
+                        global_step = (param.epoch * param.nbatch + count)/self.batch_size
+                        self.summary_writer.add_scalar(tag='speed', 
+                            value={'speed':speed}, global_step=global_step)
+
+                        for name in name_value:
+                            self.summary_writer.add_scalar(tag='accuracy', 
+                                value={name[0]:name[1]}, global_step=global_step)
+                    else:
+                        msg = 'Epoch[%d] Batch [0-%d]\tSpeed: %.2f samples/sec'
+                        msg += '\t%s=%f'*len(name_value)
+                        #logging.info(msg, param.epoch, count, speed, *sum(name_value, ()))
+                else:
+                    pass
+                    #logging.info("Iter[%d] Batch [%d]\tSpeed: %.2f samples/sec",
+                                 #param.epoch, count, speed)
+                self.tic = time.time()
+        else:
+            self.init = True
+            self.tic = time.time()
+   
 def fit(args, network, data_loader, **kwargs):
     """
     train a model
@@ -215,6 +328,10 @@ def fit(args, network, data_loader, **kwargs):
     network : the symbol definition of the nerual network
     data_loader : function that returns the train and val data iterators
     """
+    # mxborad  
+    sw_train = SummaryWriter(logdir='./logs/train', flush_secs=20)
+    sw_val = SummaryWriter(logdir='./logs/val', flush_secs=20)
+
     # kvstore
     kv = mx.kvstore.create(args.kv_store)
     if args.gc_type != 'none':
@@ -241,7 +358,7 @@ def fit(args, network, data_loader, **kwargs):
 
         return
 
-    print(train.next())
+    print('next_sample',train.next())
     # load model
     if 'arg_params' in kwargs and 'aux_params' in kwargs:
         arg_params = kwargs['arg_params']
@@ -298,10 +415,14 @@ def fit(args, network, data_loader, **kwargs):
     eval_metrics = Multi_Acc_Metric(num=7,label_names= ['gender_label','hat_label','bag_label','handbag_label','backpack_label','updress_label','downdress_label'])
 
     # callbacks that run after each batch
-    batch_end_callbacks = [mx.callback.Speedometer(args.batch_size, args.disp_batches)]
+    batch_end_callbacks = [mx.callback.Speedometer(args.batch_size, args.disp_batches,False)]
+    batch_end_callback_with_sw = [Speedometerboradwriter(args.batch_size,sw_train,args.disp_batches)]
+    eval_end_callback_with_sw = [LogMetricsCallback(sw_val)]
     if 'batch_end_callback' in kwargs:
         cbs = kwargs['batch_end_callback']
         batch_end_callbacks += cbs if isinstance(cbs, list) else [cbs]
+    batch_end_callbacks +=batch_end_callback_with_sw
+    print(batch_end_callbacks)
 
     # run
     model.fit(train,
@@ -316,6 +437,7 @@ def fit(args, network, data_loader, **kwargs):
               arg_params         = arg_params,
               aux_params         = aux_params,
               batch_end_callback = batch_end_callbacks,
+              eval_end_callback  = eval_end_callback_with_sw,
               epoch_end_callback = checkpoint,
               allow_missing      = True,
               monitor            = monitor)
