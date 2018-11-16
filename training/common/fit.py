@@ -19,17 +19,27 @@ import mxnet as mx
 import logging
 import os
 import time
+import math
 from mxboard import SummaryWriter
 
 
+def get_epoch_size(args, kv):
+    return math.ceil(int(args.num_examples / kv.num_workers) / args.batch_size)
 
 def _get_lr_scheduler(args, kv):
+
+
     if 'lr_factor' not in args or args.lr_factor >= 1:
         return (args.lr, None)
-    epoch_size = args.num_examples / args.batch_size
-    if 'dist' in args.kv_store:
-        epoch_size /= kv.num_workers
+    epoch_size = get_epoch_size(args, kv)
     begin_epoch = args.load_epoch if args.load_epoch else 0
+    if 'pow' in args.lr_step_epochs:
+        lr = args.lr
+        max_up = args.num_epochs * epoch_size
+        pwr = float(re.sub('pow[- ]*', '', args.lr_step_epochs))
+        poly_sched = mx.lr_scheduler.PolyScheduler(max_up, lr, pwr)
+        return (lr, poly_sched)
+
     step_epochs = [int(l) for l in args.lr_step_epochs.split(',')]
     lr = args.lr
     for s in step_epochs:
@@ -71,7 +81,8 @@ def add_fit_args(parser):
     train.add_argument('--network', type=str,
                        help='the neural network to use')
     train.add_argument('--num-layers', type=int,
-                       help='number of layers in the neural network, required by some networks such as resnet')
+                       help='number of layers in the neural network, \
+                             required by some networks such as resnet')
     train.add_argument('--gpus', type=str,
                        help='list of gpus to run, e.g. 0 or 0,2,5. empty means using cpu')
     train.add_argument('--kv-store', type=str, default='device',
@@ -84,6 +95,8 @@ def add_fit_args(parser):
                        help='the ratio to reduce lr on each step')
     train.add_argument('--lr-step-epochs', type=str,
                        help='the epochs to reduce the lr, e.g. 30,60')
+    train.add_argument('--initializer', type=str, default='default',
+                       help='the initializer type')
     train.add_argument('--optimizer', type=str, default='sgd',
                        help='the optimizer type')
     train.add_argument('--mom', type=float, default=0.9,
@@ -96,12 +109,15 @@ def add_fit_args(parser):
                        help='show progress for every n batches')
     train.add_argument('--model-prefix', type=str,
                        help='model prefix')
+    train.add_argument('--save-period', type=int, default=1, help='params saving period')
     parser.add_argument('--monitor', dest='monitor', type=int, default=0,
                         help='log network parameters every N iters if larger than 0')
     train.add_argument('--load-epoch', type=int,
                        help='load the model on an epoch using the model-load-prefix')
     train.add_argument('--top-k', type=int, default=0,
                        help='report the top-k accuracy. 0 means no report.')
+    train.add_argument('--loss', type=str, default='',
+                       help='show the cross-entropy or nll loss. ce strands for cross-entropy, nll-loss stands for likelihood loss')
     train.add_argument('--test-io', type=int, default=0,
                        help='1 means test reading speed without training')
     train.add_argument('--dtype', type=str, default='float32',
@@ -111,8 +127,21 @@ def add_fit_args(parser):
                              takes `2bit` or `none` for now')
     train.add_argument('--gc-threshold', type=float, default=0.5,
                        help='threshold for 2bit gradient compression')
+    # additional parameters for large batch sgd
+    train.add_argument('--macrobatch-size', type=int, default=0,
+                       help='distributed effective batch size')
+    train.add_argument('--warmup-epochs', type=int, default=5,
+                       help='the epochs to ramp-up lr to scaled large-batch value')
+    train.add_argument('--warmup-strategy', type=str, default='linear',
+                       help='the ramping-up strategy for large batch sgd')
+    train.add_argument('--profile-worker-suffix', type=str, default='',
+                       help='profile workers actions into this file. During distributed training\
+                             filename saved will be rank1_ followed by this suffix')
+    train.add_argument('--profile-server-suffix', type=str, default='',
+                       help='profile server actions into a file with name like rank1_ followed by this suffix \
+                             during distributed training')
     return train
-
+ 
 class Multi_Acc_Metric(mx.metric.EvalMetric):
     """Calculate accuracies of multi label"""
     def __init__(self, num=None, logger= None,label_names = []):
@@ -331,6 +360,10 @@ def fit(args, network, data_loader, **kwargs):
     # mxborad  
     sw_train = SummaryWriter(logdir='./logs/train', flush_secs=20)
     sw_val = SummaryWriter(logdir='./logs/val', flush_secs=20)
+    sw_image= SummaryWriter(logdir='./logs/image', flush_secs=20)
+    sw_symbol= SummaryWriter(logdir='./logs/symbol', flush_secs=20)
+    sw_symbol.add_graph(network)
+    args.summary_writer_image = None
 
     # kvstore
     kv = mx.kvstore.create(args.kv_store)
@@ -343,9 +376,18 @@ def fit(args, network, data_loader, **kwargs):
     logging.basicConfig(level=logging.DEBUG, format=head)
     logging.info('start with arguments %s', args)
 
+    #epoch_size 
+    epoch_size = get_epoch_size(args, kv)
+
     # data iterators
 
     (train, val) = data_loader(args, kv)
+    if 'dist' in args.kv_store and not 'async' in args.kv_store:
+        logging.info('Resizing training data to %d batches per machine', epoch_size)
+        # resize train iter to ensure each machine has same number of batches per epoch
+        # if not, dist_sync can hang at the end with one machine waiting for other machines
+        train = mx.io.ResizeIter(train, epoch_size)
+
     if args.test_io:
         tic = time.time()
         for i, batch in enumerate(train):
@@ -357,6 +399,7 @@ def fit(args, network, data_loader, **kwargs):
                 tic = time.time()
 
         return
+
 
     print('next_sample',train.next())
     # load model
@@ -393,19 +436,57 @@ def fit(args, network, data_loader, **kwargs):
         'multi_precision': True}
 
     # Only a limited number of optimizers have 'momentum' property
-    has_momentum = {'sgd', 'dcasgd', 'nag'}
+    has_momentum = {'sgd', 'dcasgd', 'nag', 'signum', 'lbsgd'}
     if args.optimizer in has_momentum:
         optimizer_params['momentum'] = args.mom
 
     monitor = mx.mon.Monitor(args.monitor, pattern=".*") if args.monitor > 0 else None
 
-    if args.network == 'alexnet':
-        # AlexNet will not converge using Xavier
-        initializer = mx.init.Normal()
-    else:
-        initializer = mx.init.Xavier(
-            rnd_type='gaussian', factor_type="in", magnitude=2)
+     # A limited number of optimizers have a warmup period
+    has_warmup = {'lbsgd', 'lbnag'}
+    if args.optimizer in has_warmup:
+        nworkers = kv.num_workers
+        if epoch_size < 1:
+            epoch_size = 1
+        macrobatch_size = args.macrobatch_size
+        if macrobatch_size < args.batch_size * nworkers:
+            macrobatch_size = args.batch_size * nworkers
+        #batch_scale = round(float(macrobatch_size) / args.batch_size / nworkers +0.4999)
+        batch_scale = math.ceil(
+            float(macrobatch_size) / args.batch_size / nworkers)
+        optimizer_params['updates_per_epoch'] = epoch_size
+        optimizer_params['begin_epoch'] = args.load_epoch if args.load_epoch else 0
+        optimizer_params['batch_scale'] = batch_scale
+        optimizer_params['warmup_strategy'] = args.warmup_strategy
+        optimizer_params['warmup_epochs'] = args.warmup_epochs
+        optimizer_params['num_epochs'] = args.num_epochs
+
+
+    if args.initializer == 'default':
+        if args.network == 'alexnet':
+            # AlexNet will not converge using Xavier
+            initializer = mx.init.Normal()
+            # VGG will not trend to converge using Xavier-Gaussian
+        elif args.network and 'vgg' in args.network:
+            initializer = mx.init.Xavier()
+        else:
+            initializer = mx.init.Xavier(rnd_type='gaussian', factor_type="in", magnitude=2)
     # initializer   = mx.init.Xavier(factor_type="in", magnitude=2.34),
+    elif args.initializer == 'xavier':
+        initializer = mx.init.Xavier()
+    elif args.initializer == 'msra':
+        initializer = mx.init.MSRAPrelu()
+    elif args.initializer == 'orthogonal':
+        initializer = mx.init.Orthogonal()
+    elif args.initializer == 'normal':
+        initializer = mx.init.Normal()
+    elif args.initializer == 'uniform':
+        initializer = mx.init.Uniform()
+    elif args.initializer == 'one':
+        initializer = mx.init.One()
+    elif args.initializer == 'zero':
+        initializer = mx.init.Zero()
+
 
     # evaluation metrices
     eval_metrics = ['accuracy']
@@ -413,6 +494,24 @@ def fit(args, network, data_loader, **kwargs):
         eval_metrics.append(mx.metric.create('top_k_accuracy', top_k=args.top_k))
         
     eval_metrics = Multi_Acc_Metric(num=7,label_names= ['gender_label','hat_label','bag_label','handbag_label','backpack_label','updress_label','downdress_label'])
+
+    supported_loss = ['ce', 'nll_loss']
+    if len(args.loss) > 0:
+        # ce or nll loss is only applicable to softmax output
+        loss_type_list = args.loss.split(',')
+        if 'softmax_output' in network.list_outputs():
+            for loss_type in loss_type_list:
+                loss_type = loss_type.strip()
+                if loss_type == 'nll':
+                    loss_type = 'nll_loss'
+                if loss_type not in supported_loss:
+                    logging.warning(loss_type + ' is not an valid loss type, only cross-entropy or ' \
+                                    'negative likelihood loss is supported!')
+                else:
+                    eval_metrics.append(mx.metric.create(loss_type))
+        else:
+            logging.warning("The output is not softmax_output, loss argument will be skipped!")
+
 
     # callbacks that run after each batch
     batch_end_callbacks = [mx.callback.Speedometer(args.batch_size, args.disp_batches,False)]
