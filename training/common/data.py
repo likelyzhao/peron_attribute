@@ -244,8 +244,72 @@ class MultiIter:
         return [mx.io.DataDesc(str(i), [batchsize,] , self.iters.provide_label[0].dtype) for i in self.label_list ]
     
         #return [i for i in self.label_list]
+
+
+class MultiIter_Mixup:
+    def __init__(self, iter_list,summary_writer= None):
+        self.iters = iter_list
+        self.label_list_origin = ['gender_label','hat_label','bag_label','handbag_label',
+                            'backpack_label','updress_label','downdress_label']        
+        self.label_list = ['gender_label','hat_label','bag_label','handbag_label',
+                            'backpack_label','updress_label','downdress_label',
+                            'gender_mix_label','hat_mix_label','bag_mix_label','handbag_mix_label',
+                            'backpack_mix_label','updress_mix_label','downdress_mix_label']
+        self.split_label = None
+        self.summary_writer = summary_writer
+    def next(self):
+        batches = self.iters.next()
+        #for idx,label in enumerate(self.label_list):
+        #    print(batches.label[0].shape)
+
+        split_label_reshape =[]
+        split_label = mx.nd.split(batches.label[0], axis=1, num_outputs=len(self.label_list_origin)) 
+
+        batch_size = split_label[0].size
+        #for split in split_label:
+        index  = np.random.permutation(batch_size)
+
+        lam = 0.8
+        mixed_x = batches.data[0] * lam+ (1.0 - lam) * batches.data[0][index, :]
+        batches.data[0] = mixed_x
+
+
+        split_label_reshape = [split.reshape([0,]) for split in split_label]
+        split_label_reshape_mixup = [split.reshape([0,])[index] for split in split_label]
+        split_label_reshape = split_label_reshape+ split_label_reshape_mixup
+
+        #print(batches.data[0].shape)
+        if self.summary_writer is not None:
+            self.summary_writer.add_image('image',(batches.data[0]+123.68)/274.740997314)
+            
+        return DataBatch(data=batches.data,
+                         label=split_label_reshape)
+            
+        #for y_slice in y:
+        #    print(y_slice.shape)
+        # split_label = [split_label,batches.label[:,idx]]
+        
+        #return DataBatch(data=batches.data,
+        #                 label=split_label)
+    def __iter__(self):
+		return self
     
+    def reset(self):
+        #for i in self.iters:
+        self.iters.reset()
+    @property
+    def provide_data(self):
+        print(self.iters.provide_data)
+        return self.iters.provide_data
+    @property
+    def provide_label(self):
+        batchsize , label_width = (self.iters.provide_label[0].shape)
+        print([i for i in self.label_list])
+        return [mx.io.DataDesc(str(i), [batchsize,] , self.iters.provide_label[0].dtype) for i in self.label_list ]
     
+        #return [i for i in self.label_list]
+    
+
 def get_rec_iter_mutil(args, kv=None):
     image_shape = tuple([int(l) for l in args.image_shape.split(',')])
     if 'benchmark' in args and args.benchmark:
@@ -303,6 +367,8 @@ def get_rec_iter_mutil(args, kv=None):
         train = MultiIter(train,args.summary_writer_image)
     else:
         train = MultiIter(train)
+        #train = MultiIter_Mixup(train)
+        
     #print(train.provide_label)
     
     if args.data_val is None:
@@ -332,5 +398,97 @@ def get_rec_iter_mutil(args, kv=None):
         val = MultiIter(val,args.summary_writer_image)
     else:
         val = MultiIter(val)
+        
+    return (train, val)
+
+def get_rec_iter_mutil_mixup(args, kv=None):
+    image_shape = tuple([int(l) for l in args.image_shape.split(',')])
+    if 'benchmark' in args and args.benchmark:
+        data_shape = (args.batch_size,) + image_shape
+        train = SyntheticDataIter(args.num_classes, data_shape, 500, np.float32)
+        return (train, None)
+    if kv:
+        (rank, nworker) = (kv.rank, kv.num_workers)
+    else:
+        (rank, nworker) = (0, 1)
+    rgb_mean = [float(i) for i in args.rgb_mean.split(',')]
+    rgb_std = [float(i) for i in args.rgb_std.split(',')]
+    train = mx.io.ImageRecordIter(
+        path_imgrec         = args.data_train,
+        path_imgidx         = args.data_train_idx,
+        label_width         = 7,
+        mean_r              = rgb_mean[0],
+        mean_g              = rgb_mean[1],
+        mean_b              = rgb_mean[2],
+        std_r               = rgb_std[0],
+        std_g               = rgb_std[1],
+        std_b               = rgb_std[2],
+        data_name           = 'data',
+        label_name          = ['gender_label','hat_label','bag_label','handbag_label','backpack_label','updress_label','downdress_label'],
+        data_shape          = image_shape,
+        batch_size          = args.batch_size,
+        rand_crop           = args.random_crop,
+        max_random_scale    = args.max_random_scale,
+        pad                 = args.pad_size,
+        fill_value          = args.fill_value,
+        random_resized_crop = args.random_resized_crop,
+        min_random_scale    = args.min_random_scale,
+        max_aspect_ratio    = args.max_random_aspect_ratio,
+        min_aspect_ratio    = args.min_random_aspect_ratio,
+        max_random_area     = args.max_random_area,
+        min_random_area     = args.min_random_area,
+        min_crop_size       = args.min_crop_size,
+        max_crop_size       = args.max_crop_size,
+        brightness          = args.brightness,
+        contrast            = args.contrast,
+        saturation          = args.saturation,
+        pca_noise           = args.pca_noise,
+        random_h            = args.max_random_h,
+        random_s            = args.max_random_s,
+        random_l            = args.max_random_l,
+        max_rotate_angle    = args.max_random_rotate_angle,
+        max_shear_ratio     = args.max_random_shear_ratio,
+        rand_mirror         = args.random_mirror,
+        preprocess_threads  = args.data_nthreads,
+        shuffle             = True,
+        num_parts           = nworker,
+        part_index          = rank)
+    #print(train.provide_label)
+    if args.summary_writer_image:
+        train = MultiIter_Mixup(train,args.summary_writer_image)
+    else:
+       # train = MultiIter(train)
+        train = MultiIter_Mixup(train)
+        
+    #print(train.provide_label)
+    
+    if args.data_val is None:
+        return (train, None)
+    
+    val = mx.io.ImageRecordIter(
+        path_imgrec         = args.data_val,
+        path_imgidx         = args.data_val_idx,
+        label_width         = 7,
+        mean_r              = rgb_mean[0],
+        mean_g              = rgb_mean[1],
+        mean_b              = rgb_mean[2],
+        std_r               = rgb_std[0],
+        std_g               = rgb_std[1],
+        std_b               = rgb_std[2],
+        data_name           = 'data',
+        label_name          = ['gender_label','hat_label','bag_label','handbag_label','backpack_label','updress_label','downdress_label'],
+        batch_size          = args.batch_size,
+        data_shape          = image_shape,
+        preprocess_threads  = args.data_nthreads,
+        rand_crop           = False,
+        rand_mirror         = False,
+        num_parts           = nworker,
+        part_index          = rank)
+    
+    if args.summary_writer_image:
+        val = MultiIter_Mixup(val,args.summary_writer_image)
+    else:
+        #val = MultiIter(val)
+        val = MultiIter_Mixup(val)
         
     return (train, val)

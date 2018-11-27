@@ -50,6 +50,7 @@ def get_fine_tune_model(symbol, arg_params, num_classes, layer_name):
     
     net_gender_split = net
     drop_out_rate = 0.8
+    lam = 0.8
 
     net_gender_hidden = feature_transform(net_gender_split,num_hidden,drop_out_rate)
     net_gender_fc = mx.symbol.FullyConnected(data=net_gender_hidden, num_hidden=2, name='fc-gender')
@@ -57,7 +58,10 @@ def get_fine_tune_model(symbol, arg_params, num_classes, layer_name):
     # net_gender_hidden_drop = mx.symbol.Dropout(net_gender_hidden, p = drop_out_rate)
     #net_gender_fc = mx.symbol.FullyConnected(data=net_gender_hidden_drop, num_hidden=2, name='fc-gender')
     #net_gender_fc = mx.symbol.BlockGrad(net_gender_fc)
+    net_gender_mix = mx.symbol.SoftmaxOutput(data=net_gender_fc, name='gender_mix',grad_scale=1,ignore_label= -1,use_ignore=True)
     net_gender = mx.symbol.SoftmaxOutput(data=net_gender_fc, name='gender',grad_scale=1,ignore_label= -1,use_ignore=True)
+
+    net_gender = lam * net_gender + (1- lam) * net_gender_mix
     
     net_hat_split = net
     net_hat_hidden = feature_transform(net_hat_split,num_hidden,drop_out_rate)
@@ -65,7 +69,10 @@ def get_fine_tune_model(symbol, arg_params, num_classes, layer_name):
     #net_hat_hidden_drop = mx.symbol.Dropout(net_hat_hidden, p = drop_out_rate)
     #net_hat_fc = mx.symbol.FullyConnected(data=net_hat_hidden_drop, num_hidden=2, name='fc-hat')
     #net_hat_fc = mx.symbol.BlockGrad(net_hat_fc)
+    net_hat_mix = mx.symbol.SoftmaxOutput(data=net_hat_fc, name='hat_mix',grad_scale=1,ignore_label= -1,use_ignore=True)
     net_hat = mx.symbol.SoftmaxOutput(data=net_hat_fc, name='hat',grad_scale=1,ignore_label= -1,use_ignore=True)
+
+    net_hat = lam * net_hat + (1- lam) * net_hat_mix
     
     net_bag_split = net
     net_bag_hidden = feature_transform(net_bag_split,num_hidden,drop_out_rate)
@@ -73,15 +80,21 @@ def get_fine_tune_model(symbol, arg_params, num_classes, layer_name):
     #net_bag_hidden_drop = mx.symbol.Dropout(net_bag_hidden, p = drop_out_rate)
     #net_bag_fc = mx.symbol.FullyConnected(data=net_bag_hidden_drop, num_hidden=2, name='fc-bag')
     #net_bag_fc = mx.symbol.BlockGrad(net_bag_fc)
+    net_bag_mix = mx.symbol.SoftmaxOutput(data=net_bag_fc, name='bag_mix',grad_scale=1,ignore_label= -1,use_ignore=True)
     net_bag = mx.symbol.SoftmaxOutput(data=net_bag_fc, name='bag',grad_scale=1,ignore_label= -1,use_ignore=True)
     
+    net_bag = lam * net_bag + (1- lam) * net_bag_mix
+
     net_handbag_split = net
     net_handbag_hidden = feature_transform(net_handbag_split,num_hidden,drop_out_rate)
     net_handbag_fc = mx.symbol.FullyConnected(data=net_handbag_hidden, num_hidden=2, name='fc-handbag')
     #net_handbag_hidden_drop = mx.symbol.Dropout(net_handbag_hidden, p = drop_out_rate)
     #net_handbag_fc = mx.symbol.FullyConnected(data=net_handbag_hidden_drop, num_hidden=2, name='fc-handbag')
     #net_handbag_fc = mx.symbol.BlockGrad(net_handbag_fc)
+    net_handbag_mix = mx.symbol.SoftmaxOutput(data=net_handbag_fc, name='handbag_mix',grad_scale=1,ignore_label= -1,use_ignore=True)
     net_handbag = mx.symbol.SoftmaxOutput(data=net_handbag_fc, name='handbag',grad_scale=1,ignore_label= -1,use_ignore=True)
+
+    net_handbag = lam * net_handbag + (1- lam) * net_handbag_mix
     
     net_backpack_split = net
     net_backpack_hidden = feature_transform(net_backpack_split,num_hidden,drop_out_rate)
@@ -89,7 +102,10 @@ def get_fine_tune_model(symbol, arg_params, num_classes, layer_name):
     #net_backpack_hidden_drop = mx.symbol.Dropout(net_backpack_hidden, p = drop_out_rate)
     #net_backpack_fc= mx.symbol.FullyConnected(data=net_backpack_hidden_drop, num_hidden=2, name='fc-backpack')
     #net_backpack_fc = mx.symbol.BlockGrad(net_backpack_fc)
+    net_backpack_mix = mx.symbol.SoftmaxOutput(data=net_backpack_fc, name='backpack_mix',grad_scale=1,ignore_label= -1,use_ignore=True)
     net_backpack = mx.symbol.SoftmaxOutput(data=net_backpack_fc, name='backpack',grad_scale=1,ignore_label= -1,use_ignore=True)
+
+    net_backpack = lam * net_backpack + (1- lam) * net_backpack_mix    
 
     net_updress_split = net
     net_updress_hidden = feature_transform(net_updress_split,num_hidden,drop_out_rate)
@@ -97,8 +113,10 @@ def get_fine_tune_model(symbol, arg_params, num_classes, layer_name):
     #net_updress_hidden_drop = mx.symbol.Dropout(net_updress_hidden, p = drop_out_rate)
     #net_updress_fc = mx.symbol.FullyConnected(data=net_updress_hidden_drop, num_hidden=7, name='fc-updress')
     net_updress_fc = mx.symbol.BlockGrad(net_updress_fc)
+    net_updress_mix = mx.symbol.SoftmaxOutput(data=net_updress_fc, name='updress_mix', ignore_label=-1,use_ignore=True,grad_scale=7)
     net_updress = mx.symbol.SoftmaxOutput(data=net_updress_fc, name='updress', ignore_label=-1,use_ignore=True,grad_scale=7)
 
+    net_updress = lam * net_updress + (1- lam) * net_updress_mix  
 
     net_downdress_split = net
     net_downdress_hidden = feature_transform(net_downdress_split,num_hidden,drop_out_rate)
@@ -106,8 +124,10 @@ def get_fine_tune_model(symbol, arg_params, num_classes, layer_name):
     #net_downdress_hidden_drop = mx.symbol.Dropout(net_downdress_hidden, p = drop_out_rate)
     #net_downdress_fc = mx.symbol.FullyConnected(data=net_downdress_hidden_drop, num_hidden=10, name='fc-downdress')
     net_downdress_fc = mx.symbol.BlockGrad(net_downdress_fc)
+    net_downdress_mix = mx.symbol.SoftmaxOutput(data=net_downdress_fc, name='downdress_mix',ignore_label= -1,use_ignore=True,grad_scale=10)
     net_downdress = mx.symbol.SoftmaxOutput(data=net_downdress_fc, name='downdress',ignore_label= -1,use_ignore=True,grad_scale=10)
 
+    net_downdress = lam * net_downdress + (1- lam) * net_downdress_mix  
 
     new_args = dict({k:arg_params[k] for k in arg_params if 'fc' not in k})
     
@@ -143,7 +163,7 @@ if __name__ == "__main__":
                         help='the name of the layer before the last fullc layer')
     # use less augmentations for fine-tune
     data.set_data_aug_level(parser, 1)
-    set_imagenet_aug(parser)
+    #set_imagenet_aug(parser)
     # use a small learning rate and less regularizations
     parser.set_defaults(image_shape='3,224,224', num_epochs=30,
                         lr=.01, lr_step_epochs='20', wd=0, mom=0)
@@ -179,6 +199,6 @@ if __name__ == "__main__":
     # train
     fit.fit(args        = args,
             network     = new_sym,
-            data_loader = data.get_rec_iter_mutil,
+            data_loader = data.get_rec_iter_mutil_mixup,
             arg_params  = new_args,
             aux_params  = aux_params)

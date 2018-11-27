@@ -110,7 +110,7 @@ def add_fit_args(parser):
     train.add_argument('--model-prefix', type=str,
                        help='model prefix')
     train.add_argument('--save-period', type=int, default=1, help='params saving period')
-    parser.add_argument('--monitor', dest='monitor', type=int, default=0,
+    train.add_argument('--monitor', dest='monitor', type=int, default=0,
                         help='log network parameters every N iters if larger than 0')
     train.add_argument('--load-epoch', type=int,
                        help='load the model on an epoch using the model-load-prefix')
@@ -209,7 +209,7 @@ class Multi_Acc_Metric(mx.metric.EvalMetric):
             return super(Multi_Metric, self).get()
         else:
             if len(self.label_names) == self.num:
-                loss = [self.sum_metric[i] / self.num_inst[i] for i in range(self.num)]
+                loss = [self.sum_metric[i] / ( self.num_inst[i]+ 1e-6) for i in range(self.num)]
                 return zip(*(('%s-%s'%(self.name, self.label_names[i]), loss[i]) for i in range(self.num)))
             else:
                 #acc = self.sum_metric[0] / self.num_inst[0] if self.num_inst[0] != 0 else float('nan')
@@ -427,6 +427,12 @@ def fit(args, network, data_loader, **kwargs):
         symbol        = network,
         label_names   = {'gender_label','hat_label','bag_label','handbag_label','backpack_label','updress_label','downdress_label'}
     )
+    model_mix = mx.mod.Module(
+        context       = devs,
+        symbol        = network,
+        label_names   = {'gender_label','hat_label','bag_label','handbag_label','backpack_label','updress_label','downdress_label',
+                         'gender_mix_label','hat_mix_label','bag_mix_label','handbag_mix_label','backpack_mix_label','updress_mix_label','downdress_mix_label'}
+    )
 
     lr_scheduler  = lr_scheduler
     optimizer_params = {
@@ -499,7 +505,7 @@ def fit(args, network, data_loader, **kwargs):
     if len(args.loss) > 0:
         # ce or nll loss is only applicable to softmax output
         loss_type_list = args.loss.split(',')
-        if 'softmax_output' in network.list_outputs():
+        if 'gender_label_output' in network.list_outputs():
             for loss_type in loss_type_list:
                 loss_type = loss_type.strip()
                 if loss_type == 'nll':
@@ -524,7 +530,7 @@ def fit(args, network, data_loader, **kwargs):
     print(batch_end_callbacks)
 
     # run
-    model.fit(train,
+    model_mix.fit(train,
               begin_epoch        = args.load_epoch if args.load_epoch else 0,
               num_epoch          = args.num_epochs,
               eval_data          = val,
